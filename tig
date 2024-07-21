@@ -1,0 +1,3 @@
+import libtig
+
+libtig.main()
