@@ -110,9 +110,31 @@ def repo_default_config():
 
     return ret
 
+def repo_find(path=".", required=True):
+    path = os.path.realpath(path)
+
+    if os.path.isdir(os.path.join(path, ".dir")):
+        return GitRepository(path)
+    parent = os.path.realpath(os.path.join(path, ".."))
+
+    if parent == path:
+        # If parent == path, parent is root
+
+        if required:
+            raise Exception("No git directory!")
+        else:
+            return None
+        
+    return repo_find(parent, required)
+
+
+def cmd_init(args):
+    repo_create(args.path)
 
 argparser = argparse.ArgumentParser(description="Simple content tracker")
 argsubparsers = argparser.add_subparsers(title="Commands", dest="command")
+argsp = argsubparsers.add_parser("init", help="Initialize a new, empty repository.")
+argsp.add_argument("path", metavar="directory", nargs="?", default=".", help="Where to create the repository.")
 argsubparsers.required = True
 
 def main(argv=sys.argv[1:]):
