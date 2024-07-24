@@ -40,7 +40,80 @@ class GitRepository(object):
             vers = int(self.config.get("core", "repositoryformatversion"))
             if vers != 0:
                 raise Exception(f"Unsupported repositoryformatversion {vers}")
+            
+
+class GitObject(object):
+    """This is an abstract class"""
+
+    def __init__(self, data=None) -> None:
+        if data != None:
+            self.deserialize(data)
+        else:
+            self.init()
+
+    def deserialize(self, data):
+        raise Exception("Unimplemented!")
     
+    def serialize(self, data):
+        raise Exception("Unimplemented!")
+    
+    def init(self, data):
+        pass
+
+
+def object_read(repo, sha):
+    """Read object sha from Git repository repo.  Return a
+    GitObject whose exact type depends on the object."""
+
+    path = repo_file(repo, "objects", sha[0:2], sha[2:])
+
+    if not os.path.isfile(path):
+        return None
+    
+    with open(path, "rb")as file:
+        raw = zlib.decompress(file.read())
+
+        # read object type
+        x = raw.find(b' ')
+        fmt = raw[0 : x]
+
+        # read and validate object size
+        y = raw.find(b'\x00', x)
+        size = int(raw[x : y].decode("ascii"))
+
+        if size != len(raw) - y - 1:
+            raise Exception("Malformed object {0}: bad length".format(sha))
+        
+        # pick constructor
+        match fmt:
+            case b'commit' : constructor=GitCommit
+            case b'tree'   : constructor=GitTree
+            case b'tag'    : constructor=GitTag
+            case b'blob'   : constructor=GitBlob
+            case _: raise Exception("Unknown type {0} for object {1}".format(fmt.decode("ascii"), sha))
+
+        return constructor(raw[y + 1:])
+    
+def object_write(obj: GitObject, repo=None):
+
+    data = obj.serialize()
+    
+    # add header
+    result = obj.fmt + b' ' + str(len(data)).encode() + b'\x00' + data
+
+    # compute hash
+    sha = hashlib.sha1(result).hexdigest()
+
+    if repo:
+        # compute path
+        path = repo_file(repo, "objects", sha[0:2], sha[2:], mkdir=True)
+
+        if not os.path.exists(path):
+            with open(path, "wb") as file:
+                # compress and write
+                file.write(zlib.compress(result))
+    return sha
+
 def repo_path(repo, *path):
     """Compute path under repo's gitdir"""
     return os.path.join(repo.gitdir, *path)
