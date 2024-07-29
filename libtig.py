@@ -54,11 +54,22 @@ class GitObject(object):
     def deserialize(self, data):
         raise Exception("Unimplemented!")
     
-    def serialize(self, data):
+    def serialize(self, repo):
         raise Exception("Unimplemented!")
     
     def init(self, data):
         pass
+
+
+class GitBlob(GitObject):
+    fmt = b'blob'
+
+    def serialize(self):
+        return self.blobdata
+
+    def deserialize(self, data):
+        self.blobdata = data
+
 
 
 def object_read(repo, sha):
@@ -201,13 +212,64 @@ def repo_find(path=".", required=True):
     return repo_find(parent, required)
 
 
+def object_find(repo, name, fmt=None, follow=True):
+    """Name resolution function"""
+    return name
+
+
+def cat_file(repo, object, fmt=None):
+    obj = object_read(repo, object_find(repo, obj, fmt=fmt))
+    sys.stdout.buffer.write(obj.serialize())
+
+def object_hash(file, fmt, repo=None):
+    """Hash object, writing it to repo if provided"""
+    data = file.read()
+
+    # Choose constructor
+    match fmt:
+        case b'commit' : obj=GitCommit(data)
+        case b'tree'   : obj=GitTree(data)
+        case b'tag'    : obj=GitTag(data)
+        case b'blob'   : obj=GitBlob(data)
+        case _: raise Exception(f"Unknown type {fmt}!")
+
+    return object_write(obj, repo)
+
+
+
 def cmd_init(args):
     repo_create(args.path)
 
+
+
+def cmd_cat_file(args):
+    repo = repo_find()
+    cat_file(repo, args.object, fmt=args.type.encode())
+
+def cmd_hash_object(args):
+    if args.write:
+        repo = repo_find()
+    else:
+        repo = None
+    
+    with open(args.path, "rb") as file:
+        sha = object_hash(file, args.type.encode(), repo)
+        print(sha)
+
+
+
+# ARGS READING 
 argparser = argparse.ArgumentParser(description="Simple content tracker")
 argsubparsers = argparser.add_subparsers(title="Commands", dest="command")
 argsp = argsubparsers.add_parser("init", help="Initialize a new, empty repository.")
+argsp = argsubparsers.add_parser("cat-file", help="Provide content of repository objects")
+argsp = argsubparsers.add_parser("hash-object", help="Compute object ID and optionally creates a blob from a file")
+argsp.add_argument("type", metavar="type", choices=["blob", "commit", "tag", "tree"], help="Specify the type")
+argsp.add_argument("object", metavar="object", help="object to display")
 argsp.add_argument("path", metavar="directory", nargs="?", default=".", help="Where to create the repository.")
+argsp.add_argument("-t", metavar="type", dest="type", choices=["blob", "commit", "tag", "tree"], default="blob", help="specify the type")
+argsp.add_argument("-w", dest="write", action="store_true", help="Actually write the object into database")
+argsp.add_argument("path", help="Read object from file")
 argsubparsers.required = True
 
 def main(argv=sys.argv[1:]):
