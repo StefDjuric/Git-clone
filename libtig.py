@@ -71,6 +71,18 @@ class GitBlob(GitObject):
         self.blobdata = data
 
 
+class GitCommit(GitObject):
+    fmt = b'commit'
+
+    def deserialize(self, data):
+        self.kvlm = kvlm_parse(data)
+
+    def serialize(self):
+        return kvlm_serialize(self.kvlm)
+    
+    def init(self):
+        self.kvlm = dict()
+
 
 def object_read(repo, sha):
     """Read object sha from Git repository repo.  Return a
@@ -288,6 +300,40 @@ def kvlm_parse(raw, start=0, dct=None):
 
     return kvlm_parse(raw,start=end + 1, dct=dct)
 
+def log_graphviz(repo, sha, seen):
+
+    if sha in seen:
+        return
+    seen.add(sha)
+
+    commit = object_read(repo, sha)
+    short_hash = sha[0:8]
+    message = commit.kvlm[None].decode("utf8").strip()
+    message = message.replace("\\", "\\\\")
+    message = message.replace("\"", "\\\"")
+
+    # Keep only the first line
+    if "\n" in message: 
+        message = message[:message.index("\n")]
+    
+    print("  c_{0} [label=\"{1}: {2}\"]".format(sha, sha[0:7], message))
+    assert commit.fmt == b'commit'
+
+    if not b'parent' in commit.kvlm.keys():
+        # Initial commit
+        return
+    
+    parents = commit.kvlm[b'parent']
+
+    if type(parents) != list:
+        parents = [parents]
+
+    for parent in parents:
+        parent = parent.decode("ascii")
+        print ("  c_{0} -> c_{1};".format(sha, parent))
+        log_graphviz(repo, parent, seen)
+
+
 def kvlm_serialize(kvlm):
     ret = b''
 
@@ -331,20 +377,33 @@ def cmd_hash_object(args):
         sha = object_hash(file, args.type.encode(), repo)
         print(sha)
 
+def cmd_log(args):
+    repo = repo_find()
+
+    print("digraph tiglog{")
+    print("  node[shape=rect]")
+    log_graphviz(repo, object_find(repo, args.commit), set())
+    print("}")
+
 
 
 # ARGS READING 
 argparser = argparse.ArgumentParser(description="Simple content tracker")
 argsubparsers = argparser.add_subparsers(title="Commands", dest="command")
+
 argsp = argsubparsers.add_parser("init", help="Initialize a new, empty repository.")
 argsp = argsubparsers.add_parser("cat-file", help="Provide content of repository objects")
 argsp = argsubparsers.add_parser("hash-object", help="Compute object ID and optionally creates a blob from a file")
-argsp.add_argument("type", metavar="type", choices=["blob", "commit", "tag", "tree"], help="Specify the type")
-argsp.add_argument("object", metavar="object", help="object to display")
+argsp = argsubparsers.add_parser("log", help="Display history of a given commit")
+
 argsp.add_argument("path", metavar="directory", nargs="?", default=".", help="Where to create the repository.")
+argsp.add_argument("object", metavar="object", help="object to display")
+argsp.add_argument("type", metavar="type", choices=["blob", "commit", "tag", "tree"], help="Specify the type")
 argsp.add_argument("-t", metavar="type", dest="type", choices=["blob", "commit", "tag", "tree"], default="blob", help="specify the type")
 argsp.add_argument("-w", dest="write", action="store_true", help="Actually write the object into database")
 argsp.add_argument("path", help="Read object from file")
+argsp.add_argument("commit", default="HEAD", nargs="?", help="Commit to start at")
+
 argsubparsers.required = True
 
 def main(argv=sys.argv[1:]):
