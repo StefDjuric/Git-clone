@@ -84,6 +84,78 @@ class GitCommit(GitObject):
         self.kvlm = dict()
 
 
+class GitTreeLeaf(object):
+
+    def __init__(self, mode, path, sha) -> None:
+        self.mode = mode
+        self.path = path
+        self.sha = sha
+
+
+class GitTree(GitObject):
+    fmt=b'tree'
+
+    def deserialize(self, data):
+        self.items = tree_parse(data)
+
+    def serialize(self):
+        return tree_serialize(self)
+
+    def init(self):
+        self.items = list()
+
+
+def tree_parse_one(raw, start=0):
+    """Extract a single record"""
+    # find the space terminator of the mode
+
+    x = raw.find(b' ', start)
+    assert x - start == 5 or x - start == 6
+
+    # read the mode
+    mode = raw[start : x]
+    if len(mode) == 5:
+        # normalize to six bytes
+        mode = b' ' + mode
+
+    # find the NULL terminator of the path
+    y = raw.find(b'\x00', x)
+
+    # and read the path
+    path = raw[x + 1 : y]
+
+    # read the SHA and convert to hash string
+    sha = format(int.from_bytes(raw[y + 1 : y + 21], "big"), "040x")
+    return y + 21, GitTreeLeaf(mode, path.decode("utf8"), sha)
+
+def  tree_parse(raw):
+    position = 0
+    max = len(raw)
+    ret = list()
+    while position < max:
+        position, data = tree_parse_one(raw, position)
+        ret.append(data)
+    return ret
+
+def tree_leaf_sort_key(leaf):
+    if leaf.mode.startswith(b'10'):
+        return leaf.path
+    else:
+        return leaf.path + '/'
+    
+def tree_serialize(obj):
+    obj.items.sort(key = tree_leaf_sort_key)
+    ret = b''
+    for i in obj.items:
+        ret += i.mode
+        ret += b' '
+        ret += i.path.encode("utf8")
+        ret += b'\x00'
+        sha = int(i.sha, 16)
+        ret += sha.to_bytes(20, byteorder="big")
+    return ret
+
+
 def object_read(repo, sha):
     """Read object sha from Git repository repo.  Return a
     GitObject whose exact type depends on the object."""
